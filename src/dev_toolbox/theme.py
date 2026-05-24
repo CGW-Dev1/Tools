@@ -199,6 +199,6 @@ def apply_ttk_theme(root: tk.Tk, name: str) -> None:
         foreground=colors["text"],
         relief="flat",
         padding=(6, 6),
-        font=UI_FONT,
+        font=SECTION_FONT,
     )
     style.map("Treeview", background=[("selected", colors["selection"])], foreground=[("selected", colors["text"])])

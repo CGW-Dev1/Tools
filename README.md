@@ -1,6 +1,6 @@
 # 全能开发工具箱 Windows EXE 桌面版
 
-本项目是一个本地离线运行的 Windows 开发工具箱 V1.0，包含 JSON、Cron、Base64、加密哈希、正则表达式、文档对比和 PDM 数据库结构查看等常用开发小工具。
+本项目是一个本地离线运行的 Windows 开发工具箱 V1.0.1，包含 JSON、Cron、Base64、加密哈希、正则表达式、文档对比和 PDM 数据库结构查看等常用开发小工具。
 
 ## 直接使用
 
@@ -9,6 +9,10 @@
 ```text
 dist\DevToolbox.exe
 ```
+
+也可以直接下载当前版本：
+
+[下载 DevToolbox.exe](https://github.com/CGW-Dev1/Tools/raw/main/dist/DevToolbox.exe)
 
 无需安装，无需联网。
 

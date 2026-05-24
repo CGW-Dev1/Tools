@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, font as tkfont, messagebox, ttk
-from typing import Any, Callable
+from typing import Any
 
 try:
     from PIL import Image, ImageDraw, ImageTk
@@ -186,12 +186,16 @@ class PdmGridTable(ttk.Frame):
         master: tk.Widget,
         columns: list[tuple[str, str, int, str]],
         copy_owner: Any,
+        *,
+        empty_text: str = "暂无数据",
     ) -> None:
         super().__init__(master)
         self.columns_def = columns
         self.copy_owner = copy_owner
+        self.empty_text = empty_text
         self.rows: list[tuple[Any, ...]] = []
         self.row_ids: list[str] = []
+        self._row_id_to_index: dict[str, int] = {}
         self.row_tags: list[str] = []
         self.selected_row: int | None = None
         self.active_cell: tuple[int, int] | None = None
@@ -260,6 +264,7 @@ class PdmGridTable(ttk.Frame):
     def set_rows(self, rows: list[tuple[Any, ...]], row_ids: list[str] | None = None, row_tags: list[str] | None = None) -> None:
         self.rows = rows
         self.row_ids = row_ids if row_ids is not None else [str(index) for index in range(len(rows))]
+        self._row_id_to_index = {item_id: index for index, item_id in enumerate(self.row_ids)}
         self.row_tags = row_tags if row_tags is not None else ["" for _row in rows]
         if self.selected_row is not None and self.selected_row >= len(self.rows):
             self.selected_row = None
@@ -451,6 +456,16 @@ class PdmGridTable(ttk.Frame):
         self._update_scrollregion()
         self._clamp_yview()
         colors = self.colors
+        if not self.rows:
+            self.body.create_text(
+                max(20, self.body.winfo_width() / 2),
+                max(20, self.body.winfo_height() / 2),
+                text=self.empty_text,
+                anchor="center",
+                fill=colors["muted"],
+                font=self.body_font,
+            )
+            return
         alt = colors["panel_alt"]
         x_positions = self._column_x_positions()
         first_row, last_row = self._visible_row_range()
@@ -536,8 +551,8 @@ class PdmGridTable(ttk.Frame):
 
     def _row_index(self, item_id: str | int) -> int | None:
         item = str(item_id)
-        if item in self.row_ids:
-            return self.row_ids.index(item)
+        if item in self._row_id_to_index:
+            return self._row_id_to_index[item]
         try:
             index = int(item)
         except (TypeError, ValueError):
@@ -1497,6 +1512,7 @@ class CryptoPage(ToolPage):
         super().__init__(app)
         self._after_id: str | None = None
         self._suppress_hash = False
+        self._file_hash_job = 0
         self.text_rows: list[DigestRow] = []
         self.file_rows: list[DigestRow] = []
         self.file_path = tk.StringVar(value="")
@@ -1528,6 +1544,7 @@ class CryptoPage(ToolPage):
         ttk.Button(text_top, text="计算", style="Accent.TButton", command=self.refresh_text_hash).pack(side="left", padx=(0, 8))
         ttk.Button(text_top, text="复制选中Hex", command=lambda: self.copy_selected_hex(self.text_table, self.text_rows)).pack(side="left", padx=(0, 8))
         ttk.Button(text_top, text="复制全部", command=lambda: self.copy_rows(self.text_rows)).pack(side="left", padx=(0, 8))
+        ttk.Button(text_top, text="导出结果", command=lambda: self.export_rows(self.text_rows, "文本摘要结果")).pack(side="left", padx=(0, 8))
         ttk.Button(text_top, text="清空", command=self.clear_text).pack(side="left")
 
         ttk.Label(text_bottom, text="编码").pack(side="left", padx=(0, 6))
@@ -1549,7 +1566,7 @@ class CryptoPage(ToolPage):
         self.text_table = self._create_result_table(text_result_frame)
         self.text_table.pack(fill="both", expand=True)
         text_paned.add(self.text_input, weight=1)
-        text_paned.add(text_result_frame, weight=2)
+        text_paned.add(text_result_frame, weight=3)
         self.text_panes.append(self.text_input)
         self.text_input.text.bind("<KeyRelease>", self._schedule_text_hash)
         self.hmac_secret.trace_add("write", lambda *_args: None if self._suppress_hash else self._schedule_text_hash())
@@ -1564,6 +1581,7 @@ class CryptoPage(ToolPage):
         ttk.Button(file_top, text="计算文件", command=self.refresh_file_hash).pack(side="left", padx=(0, 8))
         ttk.Button(file_top, text="复制选中Hex", command=lambda: self.copy_selected_hex(self.file_table, self.file_rows)).pack(side="left", padx=(0, 8))
         ttk.Button(file_top, text="复制全部", command=lambda: self.copy_rows(self.file_rows)).pack(side="left", padx=(0, 8))
+        ttk.Button(file_top, text="导出结果", command=lambda: self.export_rows(self.file_rows, "文件摘要结果")).pack(side="left", padx=(0, 8))
         ttk.Button(file_top, text="清空", command=self.clear_file).pack(side="left")
         self.file_info = ttk.Label(file_bottom, text="未选择文件", style="Status.TLabel")
         self.file_info.pack(side="left", fill="x", expand=True)
@@ -1576,13 +1594,14 @@ class CryptoPage(ToolPage):
         return PdmGridTable(
             master,
             [
-                ("kind", "类型", 90, "center"),
-                ("algorithm", "算法", 130, "center"),
-                ("bits", "位数", 70, "center"),
-                ("hex", "Hex结果", 620, "center"),
-                ("base64", "Base64结果", 320, "center"),
+                ("kind", "类型", 70, "center"),
+                ("algorithm", "算法", 110, "center"),
+                ("bits", "位数", 58, "center"),
+                ("hex", "Hex结果", 420, "center"),
+                ("base64", "Base64结果", 250, "center"),
             ],
             self,
+            empty_text="输入文本或选择文件后显示摘要结果",
         )
 
     def apply_theme(self, colors: dict[str, str]) -> None:
@@ -1637,6 +1656,8 @@ class CryptoPage(ToolPage):
         if not path:
             self.set_status("请先选择文件", "warning")
             return
+        self._file_hash_job += 1
+        job_id = self._file_hash_job
         uppercase = self.uppercase.get()
         hmac_secret = self.hmac_secret.get()
         encoding = self.encoding.get()
@@ -1655,11 +1676,13 @@ class CryptoPage(ToolPage):
             except Exception as exc:
                 rows = []
                 error = exc
-            self.after(0, lambda: self._file_hash_finished(path, rows, error))
+            self.after(0, lambda: self._file_hash_finished(job_id, path, rows, error))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _file_hash_finished(self, path: str, rows: list[DigestRow], error: Exception | None) -> None:
+    def _file_hash_finished(self, job_id: int, path: str, rows: list[DigestRow], error: Exception | None) -> None:
+        if job_id != self._file_hash_job or path != self.file_path.get():
+            return
         if error is not None:
             self.file_info.configure(text=f"文件摘要计算失败：{error}")
             self.set_status("文件摘要计算失败", "error")
@@ -1690,6 +1713,21 @@ class CryptoPage(ToolPage):
             return
         self.copy_text(rows_to_text(rows))
 
+    def export_rows(self, rows: list[DigestRow], title: str) -> None:
+        if not rows:
+            self.set_status("暂无可导出的摘要结果", "warning")
+            return
+        path = filedialog.asksaveasfilename(
+            title=f"导出{title}",
+            initialfile=f"{title}.txt",
+            defaultextension=".txt",
+            filetypes=[("文本文件", "*.txt"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+        Path(path).write_text(rows_to_text(rows), encoding="utf-8")
+        self.set_status(f"已导出：{path}", "success")
+
     def clear_text(self) -> None:
         self.text_input.clear()
         self.text_rows = []
@@ -1697,6 +1735,7 @@ class CryptoPage(ToolPage):
         self.text_status.configure(text="已清空")
 
     def clear_file(self) -> None:
+        self._file_hash_job += 1
         self.file_path.set("")
         self.file_rows = []
         self.file_table.set_rows([])
@@ -1715,7 +1754,7 @@ class CryptoPage(ToolPage):
     def load_state(self, data: dict[str, Any]) -> None:
         self.text_input.set(data.get("text", ""))
         self.encoding.set(data.get("encoding", "UTF-8"))
-        self.hmac_secret.set(data.get("secret", ""))
+        self.hmac_secret.set("")
         self.uppercase.set(bool(data.get("uppercase", False)))
         if self.text_input.get() or self.hmac_secret.get():
             self._schedule_text_hash()
@@ -1725,7 +1764,6 @@ class CryptoPage(ToolPage):
         return {
             "text": text if len(text) <= 800_000 else "",
             "encoding": self.encoding.get(),
-            "secret": self.hmac_secret.get(),
             "uppercase": self.uppercase.get(),
         }
 
@@ -1887,6 +1925,7 @@ class DocumentComparePage(ToolPage):
                 ("new", "文档2内容", 500, "center"),
             ],
             self,
+            empty_text="暂无差异",
         )
         self.diff_rows.pack(fill="both", expand=True)
         result_tabs.add(list_frame, text="差异列表")
@@ -3194,8 +3233,11 @@ class DevToolboxApp(tk.Tk):
         self.set_status("全部工具已清空", "success")
 
     def copy_text(self, text: str) -> None:
+        if not text:
+            self.set_status("没有可复制内容", "warning")
+            return
         self.clipboard_clear()
-        self.clipboard_append(text)
+        self.clipboard_append(str(text))
         self.set_status("已复制到剪贴板", "success")
 
     def set_status(self, text: str, kind: str = "muted") -> None:
