@@ -2204,6 +2204,7 @@ class FinanceReaderPage(ToolPage):
         self.result: FinanceParseResult | None = None
         self.filtered_rows: list[tuple[str, ...]] = []
         self._search_after_id: str | None = None
+        self._column_fit_after_id: str | None = None
         self._active_tree_cell: tuple[Any, str, str] | None = None
         self._copy_menu_tree: Any | None = None
         self._copy_menu_cell: tuple[Any, str, str] | None = None
@@ -2239,27 +2240,9 @@ class FinanceReaderPage(ToolPage):
         ttk.Label(option_row, text="搜索").pack(side="left", padx=(0, 6))
         ttk.Entry(option_row, textvariable=self.search).pack(side="left", fill="x", expand=True)
 
-        paned = ttk.PanedWindow(self, orient="horizontal")
-        paned.pack(fill="both", expand=True)
-        left = ttk.Frame(paned)
-        right = ttk.Frame(paned)
-
-        ttk.Label(left, text="识别信息", style="Section.TLabel").pack(anchor="w", pady=(0, 6))
-        info_frame = ttk.Frame(left)
-        info_frame.pack(fill="both", expand=True)
-        self.info_tree = ttk.Treeview(info_frame, columns=("value",), show="tree headings", height=16)
-        self.info_tree.heading("#0", text="项目", anchor="center")
-        self.info_tree.heading("value", text="内容", anchor="center")
-        self.info_tree.column("#0", width=110, anchor="center")
-        self.info_tree.column("value", width=260, anchor="center")
-        info_scroll = ttk.Scrollbar(info_frame, orient="vertical", command=self.info_tree.yview)
-        self.info_tree.configure(yscrollcommand=info_scroll.set)
-        self.info_tree.pack(side="left", fill="both", expand=True)
-        info_scroll.pack(side="right", fill="y")
-
-        tabs = ttk.Notebook(right)
-        tabs.pack(fill="both", expand=True)
-        table_frame = ttk.Frame(tabs)
+        self.tabs = ttk.Notebook(self)
+        self.tabs.pack(fill="both", expand=True)
+        table_frame = ttk.Frame(self.tabs)
         self.table = PdmGridTable(
             table_frame,
             [("raw", "数据", 760, "center")],
@@ -2267,22 +2250,21 @@ class FinanceReaderPage(ToolPage):
             empty_text="打开金融接口文件后显示表格数据",
         )
         self.table.pack(fill="both", expand=True)
-        tabs.add(table_frame, text="表格数据")
+        self.table.body.bind("<Configure>", lambda _event: self._schedule_column_fit(), add="+")
+        self.tabs.add(table_frame, text="表格数据")
 
-        raw_frame = ttk.Frame(tabs)
+        raw_frame = ttk.Frame(self.tabs)
         self.raw_preview = TextPane(raw_frame, "原始预览", wrap="none", readonly=True)
         self.raw_preview.pack(fill="both", expand=True)
         self.text_panes.append(self.raw_preview)
-        tabs.add(raw_frame, text="原始预览")
+        self.tabs.add(raw_frame, text="原始预览")
 
-        detail_frame = ttk.Frame(tabs)
+        detail_frame = ttk.Frame(self.tabs)
         self.detail_text = TextPane(detail_frame, "识别详情", wrap="word", readonly=True)
         self.detail_text.pack(fill="both", expand=True)
         self.text_panes.append(self.detail_text)
-        tabs.add(detail_frame, text="识别详情")
+        self.tabs.add(detail_frame, text="识别详情")
 
-        paned.add(left, weight=1)
-        paned.add(right, weight=3)
         self.search.trace_add("write", lambda *_args: self._schedule_filter())
 
     def apply_theme(self, colors: dict[str, str]) -> None:
@@ -2327,14 +2309,7 @@ class FinanceReaderPage(ToolPage):
         if self.result is None:
             return
         result = self.result
-        self.finance_status.configure(text=f"{Path(result.path).name}，{result.format_kind}，置信度{result.confidence}")
-        for item in self.info_tree.get_children():
-            self.info_tree.delete(item)
-        for key, value in result.details:
-            self.info_tree.insert("", "end", text=key, values=(value,))
-        for warning in result.warnings:
-            self.info_tree.insert("", "end", text="提示", values=(warning,))
-
+        self._set_file_status()
         self.raw_preview.set(result.raw_preview)
         detail_lines = [f"{key}：{value}" for key, value in result.details]
         if result.warnings:
@@ -2342,6 +2317,7 @@ class FinanceReaderPage(ToolPage):
             detail_lines.extend(f"提示：{warning}" for warning in result.warnings)
         self.detail_text.set("\n".join(detail_lines))
         self._apply_filter()
+        self.tabs.select(0)
 
     def _schedule_filter(self) -> None:
         if self._search_after_id:
@@ -2362,19 +2338,75 @@ class FinanceReaderPage(ToolPage):
         else:
             rows = self.result.rows
         self.filtered_rows = rows
-        self._set_columns(self.result.headers)
+        self._set_columns(self.result.headers, rows)
         self.table.set_rows(rows)
         if query:
-            self.finance_status.configure(text=f"匹配{len(rows):,}行 / 共{self.result.displayed_rows:,}行")
+            self.finance_status.configure(text=f"匹配{len(rows):,}行/共{self.result.displayed_rows:,}行")
+        else:
+            self._set_file_status()
 
-    def _set_columns(self, headers: list[str]) -> None:
+    def _schedule_column_fit(self) -> None:
+        if self.result is None:
+            return
+        if self._column_fit_after_id:
+            self.after_cancel(self._column_fit_after_id)
+        self._column_fit_after_id = self.after(120, self._run_column_fit)
+
+    def _run_column_fit(self) -> None:
+        self._column_fit_after_id = None
+        if self.result is None:
+            return
+        self._set_columns(self.result.headers, self.filtered_rows or self.result.rows)
+
+    def _set_file_status(self) -> None:
+        if self.result is None:
+            return
+        result = self.result
+        self.finance_status.configure(text=f"{Path(result.path).name}，{result.format_kind}，置信度{result.confidence}")
+
+    def _set_columns(self, headers: list[str], rows: list[tuple[str, ...]] | None = None) -> None:
         columns: list[tuple[str, str, int, str]] = []
+        widths = self._finance_column_widths(headers, rows or [])
         for index, header in enumerate(headers):
-            width = 90 if index < 3 else 140
+            width = widths[index] if index < len(widths) else 100
             if len(headers) <= 4:
-                width = 180
+                width = max(width, 180)
             columns.append((f"c{index}", header, width, "center"))
-        self.table.set_columns(columns or [("raw", "数据", 760, "center")])
+        columns = columns or [("raw", "数据", 760, "center")]
+        if self.table.columns_def != columns:
+            self.table.set_columns(columns)
+
+    def _finance_column_widths(self, headers: list[str], rows: list[tuple[str, ...]]) -> list[int]:
+        if not headers:
+            return []
+        header_font = tkfont.Font(font=self.table.header_font)
+        body_font = tkfont.Font(font=self.table.body_font)
+        min_width = 70 if len(headers) <= 12 else 58
+        max_width = 180 if len(headers) <= 10 else 150 if len(headers) <= 20 else 128
+        sample_rows = rows[:120]
+        widths: list[int] = []
+        for index, header in enumerate(headers):
+            natural = header_font.measure(str(header)) + 28
+            for row in sample_rows:
+                if index < len(row):
+                    natural = max(natural, body_font.measure(str(row[index])) + 24)
+            widths.append(max(min_width, min(max_width, natural)))
+
+        viewport = max(0, self.table.body.winfo_width() - 4)
+        if viewport <= 100:
+            return [int(width) for width in widths]
+        total = sum(widths)
+        if total > viewport and min_width * len(widths) < viewport:
+            scale = (viewport - min_width * len(widths)) / max(1, total - min_width * len(widths))
+            widths = [min_width + int((width - min_width) * scale) for width in widths]
+            diff = int(viewport - sum(widths))
+            for index in range(max(0, diff)):
+                widths[index % len(widths)] += 1
+        elif total < viewport:
+            extra = int(viewport - total)
+            for index in range(extra):
+                widths[index % len(widths)] += 1
+        return [max(44, int(width)) for width in widths]
 
     def export_csv(self) -> None:
         if self.result is None:
@@ -2397,12 +2429,16 @@ class FinanceReaderPage(ToolPage):
         self.search.set("")
         self.result = None
         self.filtered_rows = []
+        if self._search_after_id:
+            self.after_cancel(self._search_after_id)
+            self._search_after_id = None
+        if self._column_fit_after_id:
+            self.after_cancel(self._column_fit_after_id)
+            self._column_fit_after_id = None
         self.table.set_columns([("raw", "数据", 760, "center")])
         self.table.set_rows([])
         self.raw_preview.clear()
         self.detail_text.clear()
-        for item in self.info_tree.get_children():
-            self.info_tree.delete(item)
         self.finance_status.configure(text="支持分隔符文件、字段定长文件、OFD/基金接口文件线索识别")
 
     def load_state(self, data: dict[str, Any]) -> None:

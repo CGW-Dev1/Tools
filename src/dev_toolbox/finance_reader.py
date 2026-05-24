@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
@@ -79,7 +80,7 @@ def parse_finance_file(
             warnings.append("未能识别稳定分隔符，已按原始文本展示。")
 
     if selected_mode == "固定分隔符" and detected_delimiter:
-        headers, rows = _parse_delimited(lines, detected_delimiter, has_header, preview_limit)
+        headers, rows = _parse_delimited(lines, detected_delimiter, has_header, preview_limit, detect_header=mode == "自动识别")
         confidence = _confidence(delimiter_score)
         format_kind = "固定分隔符文件"
     elif selected_mode == "字段定长":
@@ -273,7 +274,14 @@ def _detect_fixed_width(lines: list[str]) -> tuple[float, int]:
     return min(1.0, consistency + no_delimiter_bonus), common
 
 
-def _parse_delimited(lines: list[str], delimiter: str, has_header: bool, limit: int) -> tuple[list[str], list[tuple[str, ...]]]:
+def _parse_delimited(
+    lines: list[str],
+    delimiter: str,
+    has_header: bool,
+    limit: int,
+    *,
+    detect_header: bool = False,
+) -> tuple[list[str], list[tuple[str, ...]]]:
     parsed: list[list[str]] = []
     max_columns = 0
     for line in lines[:limit + (1 if has_header else 0)]:
@@ -283,13 +291,60 @@ def _parse_delimited(lines: list[str], delimiter: str, has_header: bool, limit: 
             row = [line]
         parsed.append([cell.strip() for cell in row])
         max_columns = max(max_columns, len(row))
-    if has_header and parsed:
+    use_header = bool(parsed) and (has_header or (detect_header and _looks_like_header(parsed)))
+    if use_header:
         headers = _normalize_headers(parsed[0], max_columns)
         body = parsed[1: limit + 1]
     else:
         headers = _default_headers(max_columns)
         body = parsed[:limit]
     return headers, [_pad_row(row, len(headers)) for row in body]
+
+
+def _looks_like_header(parsed: list[list[str]]) -> bool:
+    if len(parsed) < 2:
+        return False
+    first = parsed[0]
+    body = [row for row in parsed[1:8] if row]
+    if len(first) < 2 or not body:
+        return False
+    nonempty = [cell for cell in first if cell.strip()]
+    if len(nonempty) / max(1, len(first)) < 0.75:
+        return False
+    header_like = sum(1 for cell in first if _is_header_like_cell(cell)) / max(1, len(first))
+    body_data_like = 0
+    body_cells = 0
+    for row in body:
+        for cell in row[: len(first)]:
+            body_cells += 1
+            if _is_data_like_cell(cell):
+                body_data_like += 1
+    data_ratio = body_data_like / max(1, body_cells)
+    return header_like >= 0.65 and data_ratio >= 0.45
+
+
+def _is_header_like_cell(value: str) -> bool:
+    text = value.strip()
+    if not text or len(text) > 48:
+        return False
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_./()（）-]*", text):
+        return True
+    return bool(re.fullmatch(r"[\u4e00-\u9fffA-Za-z_][\u4e00-\u9fffA-Za-z0-9_./()（）-]*", text))
+
+
+def _is_data_like_cell(value: str) -> bool:
+    text = value.strip()
+    if not text:
+        return True
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", text):
+        return True
+    if re.fullmatch(r"\d{4}[-/]?\d{2}[-/]?\d{2}", text):
+        return True
+    if re.fullmatch(r"\d{2}:?\d{2}:?\d{2}", text):
+        return True
+    if "@" in text or "://" in text:
+        return True
+    return False
 
 
 def _parse_fixed_width(lines: list[str], widths: list[int], limit: int) -> tuple[list[str], list[tuple[str, ...]]]:
