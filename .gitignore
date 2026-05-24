@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Local app state and logs
+state.json
+*.log
+
+# Generated test/sample files
+samples/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
