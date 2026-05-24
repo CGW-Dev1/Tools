@@ -3352,14 +3352,30 @@ class DevToolboxApp(tk.Tk):
     def _build_shell(self) -> None:
         self.root_frame = ttk.Frame(self)
         self.root_frame.pack(fill="both", expand=True)
-        self.sidebar = ttk.Frame(self.root_frame, style="Sidebar.TFrame", width=220)
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
 
-        brand = ttk.Label(self.sidebar, text="DevToolbox", style="Panel.TLabel", font=BRAND_FONT)
-        brand.pack(anchor="w", padx=18, pady=(18, 2))
-        version = ttk.Label(self.sidebar, text=f"WindowsEXEV{__version__}", style="PanelMuted.TLabel")
-        version.pack(anchor="w", padx=18, pady=(0, 18))
+        appbar = ttk.Frame(self.root_frame)
+        appbar.pack(fill="x", padx=18, pady=(10, 4))
+        appbar.grid_columnconfigure(3, weight=1)
+
+        brand_box = ttk.Frame(appbar)
+        brand_box.grid(row=0, column=0, sticky="w")
+        brand = ttk.Label(brand_box, text=f"{APP_TITLE}V{__version__}", style="TLabel", font=BRAND_FONT)
+        brand.pack(side="left")
+        author = ttk.Label(brand_box, text="Author:Valiant", style="Muted.TLabel")
+        author.pack(side="left", padx=(12, 0))
+
+        ttk.Separator(appbar, orient="vertical").grid(row=0, column=1, sticky="ns", padx=16)
+        self.title_label = ttk.Label(appbar, text="", style="TLabel", font=ui_font(10, "bold"), width=18)
+        self.title_label.grid(row=0, column=2, sticky="w")
+        self.status = ttk.Label(appbar, text="就绪", style="Status.TLabel", anchor="e", width=34)
+        self.status.grid(row=0, column=3, sticky="ew", padx=(10, 14))
+
+        actions = ttk.Frame(appbar)
+        actions.grid(row=0, column=4, sticky="e")
+        ttk.Button(actions, text="清空全部", command=self.clear_all).pack(side="left", padx=(0, 8))
+        self.theme_button = ttk.Button(actions, text="浅色主题" if self.theme_name == "dark" else "深色主题", command=self.toggle_theme)
+        self.theme_button.pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="关于", command=self.show_about).pack(side="left")
 
         self.sidebar_menu = [
             ("json", "JSON格式化"),
@@ -3367,33 +3383,17 @@ class DevToolboxApp(tk.Tk):
             ("base64", "Base64编解码"),
             ("crypto", "加密哈希"),
             ("finance", "金融文件阅读器"),
-            ("regex", "Regex正则表达式"),
+            ("regex", "正则表达式"),
             ("diff", "文档对比"),
             ("pdm", "PDM数据库"),
         ]
+        self.sidebar = ttk.Frame(self.root_frame)
+        self.sidebar.pack(fill="x", padx=18, pady=(0, 8))
         for key, title in self.sidebar_menu:
             self._create_sidebar_item(key, title)
 
-        filler = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
-        filler.pack(fill="both", expand=True)
-        privacy = ttk.Label(self.sidebar, text="Author:Valiant", style="PanelMuted.TLabel", wraplength=180)
-        privacy.pack(anchor="w", padx=18, pady=(0, 18))
-
-        main = ttk.Frame(self.root_frame)
-        main.pack(side="left", fill="both", expand=True)
-        top = ttk.Frame(main)
-        top.pack(fill="x", padx=18, pady=(16, 10))
-        self.title_label = ttk.Label(top, text="", style="Title.TLabel")
-        self.title_label.pack(side="left")
-        ttk.Button(top, text="清空全部", command=self.clear_all).pack(side="right", padx=(8, 0))
-        self.theme_button = ttk.Button(top, text="浅色主题" if self.theme_name == "dark" else "深色主题", command=self.toggle_theme)
-        self.theme_button.pack(side="right", padx=(8, 0))
-        ttk.Button(top, text="关于", command=self.show_about).pack(side="right")
-
-        self.content = ttk.Frame(main)
-        self.content.pack(fill="both", expand=True, padx=18, pady=(0, 10))
-        self.status = ttk.Label(main, text="就绪", style="Status.TLabel")
-        self.status.pack(fill="x", padx=18, pady=(0, 12))
+        self.content = ttk.Frame(self.root_frame)
+        self.content.pack(fill="both", expand=True, padx=18, pady=(0, 12))
 
     def _create_pages(self) -> None:
         page_classes: list[type[ToolPage]] = [JsonPage, CronPage, Base64Page, CryptoPage, FinanceReaderPage, RegexPage, DocumentComparePage, PdmPage]
@@ -3410,9 +3410,9 @@ class DevToolboxApp(tk.Tk):
         self.state_store.active_tool = key
         page = self.pages[key]
         page.tkraise()
-        self.title_label.configure(text=page.title)
+        self.title_label.configure(text=f"当前：{page.title}")
         self._refresh_sidebar_styles()
-        self.set_status(f"当前工具：{page.title}")
+        self.set_status("就绪")
 
     def apply_theme(self) -> None:
         apply_ttk_theme(self, self.theme_name)
@@ -3425,15 +3425,18 @@ class DevToolboxApp(tk.Tk):
 
     def _create_sidebar_item(self, key: str, title: str) -> None:
         colors = palette(self.theme_name)
+        text_width = tkfont.Font(font=UI_FONT).measure(title)
+        item_width = max(106, min(176, text_width + 62))
         canvas = tk.Canvas(
             self.sidebar,
-            height=44,
-            bg=colors["sidebar"],
+            width=item_width,
+            height=40,
+            bg=colors["bg"],
             bd=0,
             highlightthickness=0,
             cursor="hand2",
         )
-        canvas.pack(fill="x", padx=10, pady=0)
+        canvas.pack(side="left", padx=0, pady=0)
         canvas.bind("<Button-1>", lambda _event, k=key: self.show_page(k))
         canvas.bind("<Enter>", lambda _event, k=key: self._set_sidebar_hover(k))
         canvas.bind("<Motion>", lambda _event, k=key: self._set_sidebar_hover(k))
@@ -3442,6 +3445,7 @@ class DevToolboxApp(tk.Tk):
         self.sidebar_items[key] = {
             "canvas": canvas,
             "title": title,
+            "width": item_width,
         }
         self._draw_sidebar_item(key)
 
@@ -3503,20 +3507,50 @@ class DevToolboxApp(tk.Tk):
         colors = palette(self.theme_name)
         active = key == self.current_key
         hover = key == self.sidebar_hover_key
-        bg = colors["accent"] if active else (colors["panel_alt"] if hover else colors["sidebar"])
+        bg = colors["accent"] if active else (colors["panel_alt"] if hover else colors["bg"])
         fg = "#ffffff" if active else colors["text"] if hover else colors["muted"]
+        outline = colors["accent"] if active else colors["border"] if hover else colors["bg"]
         state = "active" if active else "hover" if hover else "normal"
 
         canvas: tk.Canvas = item["canvas"]
-        canvas.configure(bg=bg)
+        canvas.configure(bg=colors["bg"])
         canvas.delete("all")
-        width = max(canvas.winfo_width(), 180)
-        height = max(canvas.winfo_height(), 44)
-        canvas.create_rectangle(0, 0, width, height, fill=bg, outline=bg)
+        width = max(canvas.winfo_width(), int(item.get("width", 112)))
+        height = max(canvas.winfo_height(), 40)
+        self._draw_round_rect(canvas, 2, 3, width - 2, height - 3, 9, fill=bg, outline=outline)
         icon = self.sidebar_icons.get(key, {}).get(state)
         if icon is not None:
-            canvas.create_image(20, height // 2, image=icon)
-        canvas.create_text(52, height // 2, text=item["title"], anchor="w", fill=fg, font=UI_FONT)
+            canvas.create_image(18, height // 2, image=icon)
+        canvas.create_text(42, height // 2, text=item["title"], anchor="w", fill=fg, font=UI_FONT)
+
+    def _draw_round_rect(self, canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs: Any) -> None:
+        points = [
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2,
+            y2,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            x1,
+            y1,
+        ]
+        canvas.create_polygon(points, smooth=True, splinesteps=12, **kwargs)
 
     def _make_sidebar_icon(self, key: str, color: str) -> Any:
         if Image is None or ImageDraw is None or ImageTk is None:
