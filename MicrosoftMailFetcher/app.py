@@ -606,6 +606,51 @@ class RedCheck(tk.Canvas):
             self.create_text(28, 10, text=self.text, anchor="w", fill=self.fg, font=("Microsoft YaHei UI", 9))
 
 
+class PlaceholderEntry(tk.Entry):
+    def __init__(self, master, variable: tk.StringVar, placeholder: str, command=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.variable = variable
+        self.placeholder = placeholder
+        self.command = command
+        self.normal_fg = kwargs.get("fg", TEXT)
+        self.placeholder_fg = "#94a9c3"
+        self.placeholder_visible = False
+        self.bind("<FocusIn>", self._clear_placeholder, add="+")
+        self.bind("<FocusOut>", self._show_placeholder_if_empty, add="+")
+        self.bind("<KeyRelease>", self._sync_variable, add="+")
+        value = self.variable.get().strip()
+        if value:
+            self.insert(0, value)
+        else:
+            self._show_placeholder()
+
+    def _show_placeholder(self) -> None:
+        self.placeholder_visible = True
+        self.configure(fg=self.placeholder_fg)
+        self.delete(0, tk.END)
+        self.insert(0, self.placeholder)
+
+    def _clear_placeholder(self, _event=None) -> None:
+        if not self.placeholder_visible:
+            return
+        self.placeholder_visible = False
+        self.configure(fg=self.normal_fg)
+        self.delete(0, tk.END)
+
+    def _show_placeholder_if_empty(self, _event=None) -> None:
+        if not self.get().strip():
+            self.variable.set("")
+            self._show_placeholder()
+
+    def _sync_variable(self, _event=None) -> None:
+        if self.placeholder_visible:
+            self.variable.set("")
+        else:
+            self.variable.set(self.get())
+        if self.command:
+            self.command()
+
+
 class ImportDialog(tk.Toplevel):
     def __init__(self, master: "MailFetcherApp") -> None:
         super().__init__(master)
@@ -765,6 +810,25 @@ def make_button(master, text: str, command, bg: str = BLUE, fg: str = "white", w
     return RoundButton(master, text=text, command=command, bg=bg, fg=fg, width=width)
 
 
+def make_copy_button(master, command) -> tk.Button:
+    return tk.Button(
+        master,
+        text="复制",
+        command=command,
+        bg="white",
+        fg=BLUE,
+        activebackground="#edf5ff",
+        activeforeground=BLUE,
+        relief="flat",
+        bd=0,
+        width=4,
+        padx=4,
+        pady=5,
+        cursor="hand2",
+        font=("Microsoft YaHei UI", 9, "bold"),
+    )
+
+
 class MailFetcherApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -825,7 +889,7 @@ class MailFetcherApp(tk.Tk):
         body = tk.Frame(outer, bg=BG)
         body.pack(fill="both", expand=True, pady=(12, 0))
 
-        left = tk.Frame(body, bg=PANEL, width=360, padx=22, pady=20, highlightbackground=BORDER, highlightthickness=1)
+        left = tk.Frame(body, bg=PANEL, width=420, padx=22, pady=20, highlightbackground=BORDER, highlightthickness=1)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
         right = tk.Frame(body, bg=BG)
@@ -837,10 +901,8 @@ class MailFetcherApp(tk.Tk):
         self.account_count_label = tk.Label(top_line, text="0", bg="#dceaff", fg=BLUE, padx=10, pady=4, font=("Microsoft YaHei UI", 9, "bold"))
         self.account_count_label.pack(side="right")
 
-        account_search = tk.Entry(left, textvariable=self.account_search_var, relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10))
+        account_search = PlaceholderEntry(left, self.account_search_var, "邮箱搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10))
         account_search.pack(fill="x", ipady=10, pady=(16, 10))
-        account_search.insert(0, "")
-        account_search.bind("<KeyRelease>", lambda _e: self.refresh_accounts(reset_scroll=True))
 
         make_button(left, "+  批量导入邮箱", self.open_import_dialog, bg=BLUE, fg="white").pack(fill="x", pady=(4, 10))
         make_button(left, "⇩  导出邮箱", self.export_accounts, bg="#f4faff", fg=TEXT).pack(fill="x")
@@ -859,13 +921,10 @@ class MailFetcherApp(tk.Tk):
         controls.pack(fill="x")
         row1 = tk.Frame(controls, bg=PANEL)
         row1.pack(fill="x")
-        keyword = tk.Entry(row1, textvariable=self.keyword_var, relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10))
+        keyword = PlaceholderEntry(row1, self.keyword_var, "邮件搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10), command=self.render_results)
         keyword.pack(side="left", fill="x", expand=True, ipady=8)
-        keyword.insert(0, "")
-        keyword.bind("<KeyRelease>", lambda _e: self.render_results())
-        sender = tk.Entry(row1, textvariable=self.sender_var, relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10))
+        sender = PlaceholderEntry(row1, self.sender_var, "发件人搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10), command=self.render_results)
         sender.pack(side="left", fill="x", expand=True, ipady=8, padx=(14, 14))
-        sender.bind("<KeyRelease>", lambda _e: self.render_results())
         top_menu = tk.OptionMenu(row1, self.top_var, "5", "10", "20", "30", command=lambda _v: self.save_config())
         top_menu.config(bg="white", fg=TEXT, relief="flat", bd=0, highlightthickness=0, width=8, font=("Microsoft YaHei UI", 10))
         top_menu.pack(side="right", ipady=6)
@@ -962,7 +1021,7 @@ class MailFetcherApp(tk.Tk):
             row = tk.Frame(self.account_scroll.inner, bg="#e8f2ff", padx=10, pady=10, highlightbackground="#bcd5ff", highlightthickness=1)
             row.pack(fill="x", pady=(0, 10))
             RedCheck(row, var, bg="#e8f2ff").pack(side="left")
-            make_button(row, "复制", lambda email_address=account.email: self.copy_email(email_address), bg="#ffffff", fg=BLUE, width=3).pack(side="right", padx=(8, 0))
+            make_copy_button(row, lambda email_address=account.email: self.copy_email(email_address)).pack(side="right", padx=(8, 0))
             txt = tk.Frame(row, bg="#e8f2ff")
             txt.pack(side="left", fill="x", expand=True)
             tk.Label(txt, text=account.email, bg="#e8f2ff", fg=TEXT, anchor="w", font=("Microsoft YaHei UI", 10)).pack(anchor="w")
