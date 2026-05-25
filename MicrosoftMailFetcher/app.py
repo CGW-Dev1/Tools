@@ -934,7 +934,19 @@ class MailFetcherApp(tk.Tk):
         title_box.pack(side="left", padx=(12, 0))
         tk.Label(title_box, text=DISPLAY_NAME, bg=PANEL, fg=TEXT, font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         tk.Label(title_box, text="IMAP OAuth2 + Graph API 双协议", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w", pady=(2, 0))
-        RoundBadge(header, self.status_var, bg=GREEN_BG, fg=GREEN).pack(side="right")
+        self.status_label = tk.Label(
+            header,
+            textvariable=self.status_var,
+            bg=GREEN_BG,
+            fg=GREEN,
+            padx=14,
+            pady=7,
+            anchor="e",
+            justify="right",
+            wraplength=520,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        )
+        self.status_label.pack(side="right", fill="x", padx=(12, 0))
 
         body = tk.Frame(outer, bg=BG)
         body.pack(fill="both", expand=True, pady=(12, 0))
@@ -975,9 +987,12 @@ class MailFetcherApp(tk.Tk):
         make_button(usage_line, "标记已使用", self.mark_selected_used, bg="#edf7ff", fg=BLUE, width=8).pack(side="left", fill="x", expand=True)
         make_button(usage_line, "取消标记", self.mark_selected_unused, bg="#f4faff", fg=TEXT, width=8).pack(side="left", fill="x", expand=True, padx=(10, 0))
 
+        left_footer = tk.Frame(left, bg=PANEL)
+        left_footer.pack(side="bottom", fill="x", pady=(12, 0))
+        make_button(left_footer, "清空全部", self.clear_accounts, bg="#f4faff", fg=TEXT).pack(anchor="w")
+
         self.account_scroll = ScrollFrame(left, PANEL)
         self.account_scroll.pack(fill="both", expand=True)
-        make_button(left, "清空全部", self.clear_accounts, bg="#f4faff", fg=TEXT).pack(anchor="w", pady=(12, 0))
 
         controls = tk.Frame(right, bg=PANEL, padx=18, pady=14, highlightbackground=BORDER, highlightthickness=1)
         controls.pack(fill="x")
