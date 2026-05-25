@@ -13,8 +13,12 @@ env/
 
 # Build artifacts
 build/
+**/build/
 dist/*
 !dist/DevToolbox.exe
+**/dist/*
+!DevToolbox/dist/
+!DevToolbox/dist/DevToolbox.exe
 *.spec
 
 # Local app state and logs
