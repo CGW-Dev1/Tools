@@ -853,6 +853,25 @@ def make_copy_button(master, command) -> tk.Button:
     )
 
 
+def make_search_box(master, variable: tk.StringVar, placeholder: str, command=None) -> tk.Frame:
+    box = tk.Frame(master, bg="white", padx=10, pady=2, highlightbackground="#8fb8ff", highlightthickness=2)
+    entry = PlaceholderEntry(
+        box,
+        variable,
+        placeholder,
+        relief="flat",
+        bd=0,
+        bg="white",
+        fg=TEXT,
+        insertbackground=BLUE,
+        selectbackground="#dbeafe",
+        font=("Microsoft YaHei UI", 10),
+        command=command,
+    )
+    entry.pack(fill="both", expand=True, ipady=7)
+    return box
+
+
 class MailFetcherApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -926,8 +945,8 @@ class MailFetcherApp(tk.Tk):
         self.account_count_label = tk.Label(top_line, text="0", bg="#dceaff", fg=BLUE, padx=10, pady=4, font=("Microsoft YaHei UI", 9, "bold"))
         self.account_count_label.pack(side="right")
 
-        account_search = PlaceholderEntry(left, self.account_search_var, "邮箱搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10))
-        account_search.pack(fill="x", ipady=10, pady=(16, 10))
+        account_search = make_search_box(left, self.account_search_var, "邮箱搜索")
+        account_search.pack(fill="x", pady=(16, 10))
 
         group_line = tk.Frame(left, bg=PANEL)
         group_line.pack(fill="x", pady=(0, 10))
@@ -958,13 +977,19 @@ class MailFetcherApp(tk.Tk):
         controls.pack(fill="x")
         row1 = tk.Frame(controls, bg=PANEL)
         row1.pack(fill="x")
-        keyword = PlaceholderEntry(row1, self.keyword_var, "邮件搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10), command=self.render_results)
-        keyword.pack(side="left", fill="x", expand=True, ipady=8)
-        sender = PlaceholderEntry(row1, self.sender_var, "发件人搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10), command=self.render_results)
-        sender.pack(side="left", fill="x", expand=True, ipady=8, padx=(14, 14))
-        top_menu = tk.OptionMenu(row1, self.top_var, "5", "10", "20", "30", command=lambda _v: self.save_config())
-        top_menu.config(bg="white", fg=TEXT, relief="flat", bd=0, highlightthickness=0, width=8, font=("Microsoft YaHei UI", 10))
-        top_menu.pack(side="right", ipady=6)
+        count_box = tk.Frame(row1, bg="white", padx=10, pady=5, highlightbackground="#8fb8ff", highlightthickness=2)
+        count_box.pack(side="right", fill="y")
+        count_text = tk.Frame(count_box, bg="white")
+        count_text.pack(side="left", fill="y", padx=(0, 8))
+        tk.Label(count_text, text="每箱取件数", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w")
+        tk.Label(count_text, text="每个邮箱最多读取", bg="white", fg=MUTED, font=("Microsoft YaHei UI", 8)).pack(anchor="w")
+        top_menu = tk.OptionMenu(count_box, self.top_var, "1", "5", "10", "20", "30", command=lambda _v: self.save_config())
+        top_menu.config(bg="#eef6ff", fg=TEXT, activebackground="#dbeafe", relief="flat", bd=0, highlightthickness=0, width=4, font=("Microsoft YaHei UI", 10, "bold"))
+        top_menu.pack(side="right", ipady=4)
+        keyword = make_search_box(row1, self.keyword_var, "邮件搜索", command=self.render_results)
+        keyword.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        sender = make_search_box(row1, self.sender_var, "发件人搜索", command=self.render_results)
+        sender.pack(side="left", fill="x", expand=True, padx=(0, 12))
 
         row2 = tk.Frame(controls, bg=PANEL)
         row2.pack(fill="x", pady=(12, 0))
