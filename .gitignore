@@ -20,7 +20,7 @@ dist/*
 !DevToolbox/dist/
 !DevToolbox/dist/DevToolbox.exe
 !MicrosoftMailFetcher/dist/
-!MicrosoftMailFetcher/dist/微软邮件获取.exe
+!MicrosoftMailFetcher/dist/邮件验证码助手.exe
 *.spec
 
 # Local app state and logs

@@ -10,4 +10,4 @@
 ## 快速下载
 
 - [下载 DevToolbox.exe](https://github.com/CGW-Dev1/Tools/raw/main/DevToolbox/dist/DevToolbox.exe)
-- [下载 微软邮件获取.exe](https://github.com/CGW-Dev1/Tools/raw/main/MicrosoftMailFetcher/dist/%E5%BE%AE%E8%BD%AF%E9%82%AE%E4%BB%B6%E8%8E%B7%E5%8F%96.exe)
+- [下载 邮件验证码助手.exe](https://github.com/CGW-Dev1/Tools/raw/main/MicrosoftMailFetcher/dist/%E9%82%AE%E4%BB%B6%E9%AA%8C%E8%AF%81%E7%A0%81%E5%8A%A9%E6%89%8B.exe)

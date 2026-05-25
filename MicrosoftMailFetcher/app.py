@@ -27,6 +27,7 @@ import requests
 
 
 APP_NAME = "OutlookHotmailMailFetcher"
+DISPLAY_NAME = "邮件验证码助手"
 AUTHORITY_BASE = "https://login.microsoftonline.com"
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 GRAPH_INTERACTIVE_SCOPES = ["Mail.Read", "offline_access"]
@@ -730,7 +731,7 @@ def make_button(master, text: str, command, bg: str = BLUE, fg: str = "white", w
 class MailFetcherApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("微软邮件获取 | IMAP + Graph API")
+        self.title(f"{DISPLAY_NAME} | IMAP + Graph API")
         self.geometry("1480x860")
         self.minsize(1180, 720)
         self.configure(bg=BG)
@@ -779,7 +780,7 @@ class MailFetcherApp(tk.Tk):
         icon.pack(side="left")
         title_box = tk.Frame(header, bg=PANEL)
         title_box.pack(side="left", padx=(12, 0))
-        tk.Label(title_box, text="微软邮件获取", bg=PANEL, fg=TEXT, font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
+        tk.Label(title_box, text=DISPLAY_NAME, bg=PANEL, fg=TEXT, font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
         tk.Label(title_box, text="IMAP OAuth2 + Graph API 双协议", bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9, "bold")).pack(anchor="w", pady=(2, 0))
         RoundBadge(header, self.status_var, bg=GREEN_BG, fg=GREEN).pack(side="right")
 

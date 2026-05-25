@@ -32,7 +32,7 @@ python app.py
 打包完成后 exe 位于：
 
 ```text
-dist\微软邮件获取.exe
+dist\邮件验证码助手.exe
 ```
 
 ## 官方参考
