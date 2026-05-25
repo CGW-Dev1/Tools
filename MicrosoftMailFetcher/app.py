@@ -202,17 +202,24 @@ class AccountStore:
         self.load()
 
     def load(self) -> None:
-        text = ""
-        if self.path.exists():
-            text = self.secure_file.read_text()
-        elif self.legacy_path.exists():
-            text = self.legacy_path.read_text(encoding="utf-8")
-        if not text:
+        try:
+            text = ""
+            if self.path.exists():
+                text = self.secure_file.read_text()
+            elif self.legacy_path.exists():
+                text = self.legacy_path.read_text(encoding="utf-8")
+            if not text:
+                self.accounts = []
+                return
+            data = json.loads(text)
+            self.accounts = [AccountRecord(**self._normalize(item)) for item in data.get("accounts", [])]
+        except Exception:
             self.accounts = []
             return
-        data = json.loads(text)
-        self.accounts = [AccountRecord(**self._normalize(item)) for item in data.get("accounts", [])]
-        self.save()
+        try:
+            self.save()
+        except Exception:
+            pass
 
     def _normalize(self, item: dict) -> dict:
         return {
@@ -319,17 +326,16 @@ class ConfigStore:
     def load(self) -> None:
         if not self.path.exists():
             return
-        data = json.loads(self.path.read_text(encoding="utf-8"))
-        self.client_id = data.get("client_id", "")
-        self.tenant = data.get("tenant", "consumers")
-        self.top = int(data.get("top", 10))
-        protocol = data.get("protocol", "Graph")
-        self.protocol = "Graph" if protocol in {"Graph优先", "Graph浼樺厛"} else protocol
-        if self.protocol not in {"Graph", "IMAP"}:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            self.client_id = data.get("client_id", "")
+            self.tenant = data.get("tenant", "consumers")
+            self.top = max(1, min(int(data.get("top", 10)), 50))
             self.protocol = "Graph"
-        self.protocol = "Graph"
-        self.auto_fetch_after_import = bool(data.get("auto_fetch_after_import", True))
-        self.concise_mode = bool(data.get("concise_mode", False))
+            self.auto_fetch_after_import = bool(data.get("auto_fetch_after_import", True))
+            self.concise_mode = bool(data.get("concise_mode", False))
+        except Exception:
+            self.protocol = "Graph"
 
     def save(self) -> None:
         data = {
@@ -908,7 +914,7 @@ class MailFetcherApp(tk.Tk):
         body = tk.Frame(outer, bg=BG)
         body.pack(fill="both", expand=True, pady=(12, 0))
 
-        left = tk.Frame(body, bg=PANEL, width=420, padx=22, pady=20, highlightbackground=BORDER, highlightthickness=1)
+        left = tk.Frame(body, bg=PANEL, width=440, padx=22, pady=20, highlightbackground=BORDER, highlightthickness=1)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
         right = tk.Frame(body, bg=BG)
@@ -962,16 +968,19 @@ class MailFetcherApp(tk.Tk):
 
         row2 = tk.Frame(controls, bg=PANEL)
         row2.pack(fill="x", pady=(12, 0))
-        self.imap_button = make_button(row2, "IMAP令牌", lambda: self.set_protocol("IMAP"), bg="#e7f0ff", fg=BLUE, width=8)
+        self.imap_button = make_button(row2, "IMAP令牌", lambda: self.set_protocol("IMAP"), bg="#e7f0ff", fg=BLUE, width=11)
         self.imap_button.pack(side="left")
-        self.graph_button = make_button(row2, "Graph令牌", lambda: self.set_protocol("Graph"), bg="#e7f0ff", fg=BLUE, width=8)
+        self.graph_button = make_button(row2, "Graph令牌", lambda: self.set_protocol("Graph"), bg="#e7f0ff", fg=BLUE, width=11)
         self.graph_button.pack(side="left", padx=(10, 0))
         RedCheck(row2, self.auto_fetch_var, text="导入后自动取件", command=self.save_config, bg=PANEL, fg=MUTED).pack(side="left", padx=(18, 0))
         RedCheck(row2, self.concise_mode_var, text="简洁模式", command=self.save_config, bg=PANEL, fg=MUTED).pack(side="left", padx=(14, 0))
-        make_button(row2, "⇩  全部取件", self.fetch_all, bg=BLUE_DARK, fg="white").pack(side="right")
-        make_button(row2, "⇩  选中取件", self.fetch_selected, bg=BLUE, fg="white").pack(side="right", padx=(0, 10))
-        make_button(row2, "停止", self.request_stop, bg="#eef6ff", fg=TEXT).pack(side="right", padx=(0, 10))
-        make_button(row2, "导出CSV", self.export_csv, bg="#eef6ff", fg=TEXT).pack(side="right", padx=(0, 10))
+
+        row3 = tk.Frame(controls, bg=PANEL)
+        row3.pack(fill="x", pady=(12, 0))
+        make_button(row3, "导出CSV", self.export_csv, bg="#eef6ff", fg=TEXT).pack(side="left")
+        make_button(row3, "停止", self.request_stop, bg="#eef6ff", fg=TEXT).pack(side="left", padx=(10, 0))
+        make_button(row3, "⇩  全部取件", self.fetch_all, bg=BLUE_DARK, fg="white").pack(side="right")
+        make_button(row3, "⇩  选中取件", self.fetch_selected, bg=BLUE, fg="white").pack(side="right", padx=(0, 10))
 
         self.progress_frame = tk.Frame(right, bg=BG)
         self.progress_frame.pack(fill="x", pady=(10, 0))
@@ -1023,7 +1032,7 @@ class MailFetcherApp(tk.Tk):
             active = self.protocol_var.get() == name
             label = f"{name}令牌"
             button.configure(
-                text=f"✓ {label}" if active else label,
+                text=f"当前 {label}" if active else label,
                 bg=BLUE if active else "#eaf2ff",
                 fg="white" if active else BLUE,
             )
@@ -1073,9 +1082,9 @@ class MailFetcherApp(tk.Tk):
             make_copy_button(row, lambda email_address=account.email: self.copy_email(email_address)).pack(side="right", padx=(8, 0))
             txt = tk.Frame(row, bg="#e8f2ff")
             txt.pack(side="left", fill="x", expand=True)
-            tk.Label(txt, text=account.email, bg="#e8f2ff", fg=TEXT, anchor="w", font=("Microsoft YaHei UI", 10)).pack(anchor="w")
+            tk.Label(txt, text=account.email, bg="#e8f2ff", fg=TEXT, anchor="w", justify="left", wraplength=280, font=("Microsoft YaHei UI", 10)).pack(anchor="w", fill="x")
             usage_text = "已使用" if account.used else "未使用"
-            tk.Label(txt, text=f"{usage_text} · {account.source} · {account.last_status}", bg="#e8f2ff", fg=MUTED, anchor="w", font=("Microsoft YaHei UI", 8)).pack(anchor="w")
+            tk.Label(txt, text=f"{usage_text} · {account.source} · {account.last_status}", bg="#e8f2ff", fg=MUTED, anchor="w", justify="left", wraplength=280, font=("Microsoft YaHei UI", 8)).pack(anchor="w", fill="x")
             self.account_scroll.bind_mousewheel_recursive(row)
         if reset_scroll:
             self.account_scroll.canvas.yview_moveto(0)
@@ -1379,11 +1388,11 @@ class MailFetcherApp(tk.Tk):
         tk.Label(top, text=row.get("time", ""), bg=CARD, fg=MUTED, font=("Microsoft YaHei UI", 9)).pack(side="right")
         if row.get("concise"):
             code_text = row.get("code") or "未识别"
-            tk.Label(card, text=f"验证码：{code_text}", bg=CARD, fg=RED if not row.get("code") else TEXT, anchor="w", justify="left", font=("Microsoft YaHei UI", 16, "bold")).pack(fill="x", pady=(8, 4))
+            tk.Label(card, text=f"验证码：{code_text}", bg=CARD, fg=RED if not row.get("code") else TEXT, anchor="w", justify="left", wraplength=1180, font=("Microsoft YaHei UI", 16, "bold")).pack(fill="x", pady=(8, 4))
         else:
-            tk.Label(card, text=subject, bg=CARD, fg=TEXT, anchor="w", justify="left", font=("Microsoft YaHei UI", 11, "bold")).pack(fill="x", pady=(8, 4))
-            tk.Label(card, text=preview, bg=CARD, fg=MUTED, anchor="w", justify="left", font=("Microsoft YaHei UI", 9)).pack(fill="x")
-        tk.Label(card, text=f"⚑ {row.get('account', '')}", bg=CARD, fg=MUTED, anchor="w", font=("Microsoft YaHei UI", 8)).pack(fill="x", pady=(8, 0))
+            tk.Label(card, text=subject, bg=CARD, fg=TEXT, anchor="w", justify="left", wraplength=1180, font=("Microsoft YaHei UI", 11, "bold")).pack(fill="x", pady=(8, 4))
+            tk.Label(card, text=preview, bg=CARD, fg=MUTED, anchor="w", justify="left", wraplength=1180, font=("Microsoft YaHei UI", 9)).pack(fill="x")
+        tk.Label(card, text=f"⚑ {row.get('account', '')}", bg=CARD, fg=MUTED, anchor="w", justify="left", wraplength=1180, font=("Microsoft YaHei UI", 8)).pack(fill="x", pady=(8, 0))
         self.bind_result_card(card, row)
         self.result_scroll.bind_mousewheel_recursive(card)
 
