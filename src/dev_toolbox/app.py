@@ -25,7 +25,6 @@ from . import __version__
 from .cron_utils import CronError, PRESETS, describe_cron, next_times
 from .crypto_utils import DigestRow, digest_file, digest_text, rows_to_text
 from .doc_compare import DiffResult, DocumentReadError, build_document_diff, read_document_file
-from .finance_reader import FinanceParseResult, export_rows_csv, parse_finance_file
 from .pdm_parser import PdmModel, PdmTable, export_table_markdown, export_table_text, parse_pdm
 from .regex_utils import REGEX_TEMPLATES, explain_regex
 from .state import StateStore
@@ -2189,362 +2188,6 @@ class DocumentComparePage(ToolPage):
         return "\n".join(lines)
 
 
-class FinanceReaderPage(ToolPage):
-    key = "finance"
-    title = "金融文件阅读器"
-
-    def __init__(self, app: "DevToolboxApp") -> None:
-        super().__init__(app)
-        self.file_path = tk.StringVar(value="")
-        self.mode = tk.StringVar(value="自动识别")
-        self.delimiter = tk.StringVar(value="")
-        self.widths = tk.StringVar(value="")
-        self.has_header = tk.BooleanVar(value=False)
-        self.search = tk.StringVar(value="")
-        self.result: FinanceParseResult | None = None
-        self.filtered_rows: list[tuple[str, ...]] = []
-        self._search_after_id: str | None = None
-        self._column_fit_after_id: str | None = None
-        self._active_tree_cell: tuple[Any, str, str] | None = None
-        self._copy_menu_tree: Any | None = None
-        self._copy_menu_cell: tuple[Any, str, str] | None = None
-        self.copy_menu = tk.Menu(self, tearoff=0)
-        self.copy_menu.add_command(label="复制单元格", command=self.copy_menu_cell)
-        self.copy_menu.add_command(label="复制整行", command=self.copy_menu_selection)
-
-        toolbar = ttk.Frame(self)
-        toolbar.pack(fill="x", pady=(0, 10))
-        action_row = ttk.Frame(toolbar)
-        action_row.pack(fill="x", pady=(0, 6))
-        option_row = ttk.Frame(toolbar)
-        option_row.pack(fill="x")
-
-        ttk.Button(action_row, text="打开金融文件", style="Accent.TButton", command=self.open_file).pack(side="left", padx=(0, 8))
-        ttk.Button(action_row, text="重新识别", command=self.reload_file).pack(side="left", padx=(0, 8))
-        ttk.Button(action_row, text="导出CSV", command=self.export_csv).pack(side="left", padx=(0, 8))
-        ttk.Button(action_row, text="复制单元格", command=lambda: self.copy_active_tree_cell(self.table)).pack(side="left", padx=(0, 8))
-        ttk.Button(action_row, text="复制选中行", command=lambda: self.copy_tree_selection(self.table)).pack(side="left", padx=(0, 8))
-        ttk.Button(action_row, text="清空", command=self.clear).pack(side="left")
-        self.finance_status = ttk.Label(action_row, text="支持分隔符文件、字段定长文件、OFD/基金接口文件线索识别", style="Status.TLabel")
-        self.finance_status.pack(side="left", padx=16)
-
-        ttk.Label(option_row, text="模式").pack(side="left", padx=(0, 6))
-        mode_box = ttk.Combobox(option_row, textvariable=self.mode, values=("自动识别", "固定分隔符", "字段定长", "原始文本"), state="readonly", width=12)
-        mode_box.pack(side="left", padx=(0, 10))
-        mode_box.bind("<<ComboboxSelected>>", lambda _event: self.reload_file())
-        ttk.Label(option_row, text="分隔符").pack(side="left", padx=(0, 6))
-        ttk.Entry(option_row, textvariable=self.delimiter, width=8).pack(side="left", padx=(0, 10))
-        ttk.Label(option_row, text="字段宽度").pack(side="left", padx=(0, 6))
-        ttk.Entry(option_row, textvariable=self.widths, width=24).pack(side="left", padx=(0, 10))
-        ttk.Checkbutton(option_row, text="首行表头", variable=self.has_header, command=self.reload_file).pack(side="left", padx=(0, 12))
-        ttk.Label(option_row, text="搜索").pack(side="left", padx=(0, 6))
-        ttk.Entry(option_row, textvariable=self.search).pack(side="left", fill="x", expand=True)
-
-        self.tabs = ttk.Notebook(self)
-        self.tabs.pack(fill="both", expand=True)
-        table_frame = ttk.Frame(self.tabs)
-        self.table = PdmGridTable(
-            table_frame,
-            [("raw", "数据", 760, "center")],
-            self,
-            empty_text="打开金融接口文件后显示表格数据",
-        )
-        self.table.pack(fill="both", expand=True)
-        self.table.body.bind("<Configure>", lambda _event: self._schedule_column_fit(), add="+")
-        self.tabs.add(table_frame, text="表格数据")
-
-        raw_frame = ttk.Frame(self.tabs)
-        self.raw_preview = TextPane(raw_frame, "原始预览", wrap="none", readonly=True)
-        self.raw_preview.pack(fill="both", expand=True)
-        self.text_panes.append(self.raw_preview)
-        self.tabs.add(raw_frame, text="原始预览")
-
-        detail_frame = ttk.Frame(self.tabs)
-        self.detail_text = TextPane(detail_frame, "识别详情", wrap="word", readonly=True)
-        self.detail_text.pack(fill="both", expand=True)
-        self.text_panes.append(self.detail_text)
-        self.tabs.add(detail_frame, text="识别详情")
-
-        self.search.trace_add("write", lambda *_args: self._schedule_filter())
-
-    def apply_theme(self, colors: dict[str, str]) -> None:
-        super().apply_theme(colors)
-        if hasattr(self, "table"):
-            self.table.apply_theme(colors)
-
-    def open_file(self) -> None:
-        path = filedialog.askopenfilename(
-            title="选择金融接口文件",
-            filetypes=[
-                ("金融接口文件", "*.txt;*.dat;*.csv;*.tsv;*.ofd;*.dbf;*.idx;*.jys;*.zj;*.hq"),
-                ("文本数据文件", "*.txt;*.dat;*.csv;*.tsv;*.log"),
-                ("所有文件", "*.*"),
-            ],
-        )
-        if not path:
-            return
-        self.file_path.set(path)
-        self.reload_file()
-
-    def reload_file(self) -> None:
-        path = self.file_path.get()
-        if not path:
-            return
-        try:
-            self.result = parse_finance_file(
-                path,
-                mode=self.mode.get(),
-                delimiter=self.delimiter.get(),
-                widths_text=self.widths.get(),
-                has_header=self.has_header.get(),
-            )
-        except Exception as exc:
-            messagebox.showerror(APP_TITLE, f"金融文件读取失败：{exc}")
-            self.set_status("金融文件读取失败", "error")
-            return
-        self.render_result()
-        self.set_status(f"金融文件识别完成：{self.result.format_kind}", "success")
-
-    def render_result(self) -> None:
-        if self.result is None:
-            return
-        result = self.result
-        self._set_file_status()
-        self.raw_preview.set(result.raw_preview)
-        detail_lines = [f"{key}：{value}" for key, value in result.details]
-        if result.warnings:
-            detail_lines.append("")
-            detail_lines.extend(f"提示：{warning}" for warning in result.warnings)
-        self.detail_text.set("\n".join(detail_lines))
-        self._apply_filter()
-        self.tabs.select(0)
-
-    def _schedule_filter(self) -> None:
-        if self._search_after_id:
-            self.after_cancel(self._search_after_id)
-        self._search_after_id = self.after(180, self._run_scheduled_filter)
-
-    def _run_scheduled_filter(self) -> None:
-        self._search_after_id = None
-        self._apply_filter()
-
-    def _apply_filter(self) -> None:
-        if self.result is None:
-            self.table.set_rows([])
-            return
-        query = self.search.get().strip().lower()
-        if query:
-            rows = [row for row in self.result.rows if query in " ".join(row).lower()]
-        else:
-            rows = self.result.rows
-        self.filtered_rows = rows
-        self._set_columns(self.result.headers, rows)
-        self.table.set_rows(rows)
-        if query:
-            self.finance_status.configure(text=f"匹配{len(rows):,}行/共{self.result.displayed_rows:,}行")
-        else:
-            self._set_file_status()
-
-    def _schedule_column_fit(self) -> None:
-        if self.result is None:
-            return
-        if self._column_fit_after_id:
-            self.after_cancel(self._column_fit_after_id)
-        self._column_fit_after_id = self.after(120, self._run_column_fit)
-
-    def _run_column_fit(self) -> None:
-        self._column_fit_after_id = None
-        if self.result is None:
-            return
-        self._set_columns(self.result.headers, self.filtered_rows or self.result.rows)
-
-    def _set_file_status(self) -> None:
-        if self.result is None:
-            return
-        result = self.result
-        self.finance_status.configure(text=f"{Path(result.path).name}，{result.format_kind}，置信度{result.confidence}")
-
-    def _set_columns(self, headers: list[str], rows: list[tuple[str, ...]] | None = None) -> None:
-        columns: list[tuple[str, str, int, str]] = []
-        widths = self._finance_column_widths(headers, rows or [])
-        for index, header in enumerate(headers):
-            width = widths[index] if index < len(widths) else 100
-            if len(headers) <= 4:
-                width = max(width, 180)
-            columns.append((f"c{index}", header, width, "center"))
-        columns = columns or [("raw", "数据", 760, "center")]
-        if self.table.columns_def != columns:
-            self.table.set_columns(columns)
-
-    def _finance_column_widths(self, headers: list[str], rows: list[tuple[str, ...]]) -> list[int]:
-        if not headers:
-            return []
-        header_font = tkfont.Font(font=self.table.header_font)
-        body_font = tkfont.Font(font=self.table.body_font)
-        min_width = 70 if len(headers) <= 12 else 58
-        max_width = 180 if len(headers) <= 10 else 150 if len(headers) <= 20 else 128
-        sample_rows = rows[:120]
-        widths: list[int] = []
-        for index, header in enumerate(headers):
-            natural = header_font.measure(str(header)) + 28
-            for row in sample_rows:
-                if index < len(row):
-                    natural = max(natural, body_font.measure(str(row[index])) + 24)
-            widths.append(max(min_width, min(max_width, natural)))
-
-        viewport = max(0, self.table.body.winfo_width() - 4)
-        if viewport <= 100:
-            return [int(width) for width in widths]
-        total = sum(widths)
-        if total > viewport and min_width * len(widths) < viewport:
-            scale = (viewport - min_width * len(widths)) / max(1, total - min_width * len(widths))
-            widths = [min_width + int((width - min_width) * scale) for width in widths]
-            diff = int(viewport - sum(widths))
-            for index in range(max(0, diff)):
-                widths[index % len(widths)] += 1
-        elif total < viewport:
-            extra = int(viewport - total)
-            for index in range(extra):
-                widths[index % len(widths)] += 1
-        return [max(44, int(width)) for width in widths]
-
-    def export_csv(self) -> None:
-        if self.result is None:
-            self.set_status("请先打开金融文件", "warning")
-            return
-        path = filedialog.asksaveasfilename(
-            title="导出金融文件表格",
-            initialfile=f"{Path(self.result.path).stem}_parsed.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV文件", "*.csv"), ("所有文件", "*.*")],
-        )
-        if not path:
-            return
-        content = export_rows_csv(self.result.headers, self.filtered_rows or self.result.rows)
-        Path(path).write_text(content, encoding="utf-8-sig")
-        self.set_status(f"已导出：{path}", "success")
-
-    def clear(self) -> None:
-        self.file_path.set("")
-        self.search.set("")
-        self.result = None
-        self.filtered_rows = []
-        if self._search_after_id:
-            self.after_cancel(self._search_after_id)
-            self._search_after_id = None
-        if self._column_fit_after_id:
-            self.after_cancel(self._column_fit_after_id)
-            self._column_fit_after_id = None
-        self.table.set_columns([("raw", "数据", 760, "center")])
-        self.table.set_rows([])
-        self.raw_preview.clear()
-        self.detail_text.clear()
-        self.finance_status.configure(text="支持分隔符文件、字段定长文件、OFD/基金接口文件线索识别")
-
-    def load_state(self, data: dict[str, Any]) -> None:
-        self.mode.set(data.get("mode", "自动识别"))
-        self.delimiter.set(data.get("delimiter", ""))
-        self.widths.set(data.get("widths", ""))
-        self.has_header.set(bool(data.get("has_header", False)))
-
-    def get_state(self) -> dict[str, Any]:
-        return {
-            "mode": self.mode.get(),
-            "delimiter": self.delimiter.get(),
-            "widths": self.widths.get(),
-            "has_header": self.has_header.get(),
-        }
-
-    def copy_menu_selection(self) -> None:
-        if self._copy_menu_tree is not None:
-            self.copy_tree_selection(self._copy_menu_tree)
-
-    def copy_menu_cell(self) -> None:
-        if self._copy_menu_cell is not None:
-            self.copy_tree_cell(*self._copy_menu_cell)
-
-    def copy_active_tree_cell(self, tree: Any) -> str:
-        if self._active_tree_cell is None:
-            self.set_status("请先点击要复制的单元格", "warning")
-            return ""
-        active_tree, item_id, column_id = self._active_tree_cell
-        if active_tree is not tree or not tree.exists(item_id):
-            self.set_status("请先点击要复制的单元格", "warning")
-            return ""
-        return self.copy_tree_cell(tree, item_id, column_id)
-
-    def copy_tree_cell(self, tree: Any, item_id: str, column_id: str) -> str:
-        content = self._tree_cell_text(tree, item_id, column_id)
-        if content is None:
-            self.set_status("请先选择要复制的单元格", "warning")
-            return ""
-        self.copy_text(content)
-        return content
-
-    def copy_tree_selection(self, tree: Any) -> str:
-        content = self._tree_selection_text(tree)
-        if not content:
-            self.set_status("请先选择要复制的行", "warning")
-            return ""
-        self.copy_text(content)
-        return content
-
-    def _copy_tree_from_event(self, tree: Any) -> str:
-        selected = list(tree.selection())
-        if len(selected) <= 1 and self._active_tree_cell is not None:
-            active_tree, item_id, column_id = self._active_tree_cell
-            if active_tree is tree and tree.exists(item_id):
-                if not selected or item_id in selected:
-                    self.copy_tree_cell(tree, item_id, column_id)
-                    return "break"
-        self.copy_tree_selection(tree)
-        return "break"
-
-    def _show_tree_copy_menu(self, event: tk.Event, tree: Any) -> str:
-        row_id = tree.identify_row(event.y)
-        column_id = tree.identify_column(event.x)
-        if row_id:
-            tree.selection_set(row_id)
-            tree.focus(row_id)
-        if row_id and column_id:
-            self._active_tree_cell = (tree, row_id, column_id)
-        tree.focus_set()
-        self._copy_menu_tree = tree
-        self._copy_menu_cell = (tree, row_id, column_id) if row_id and column_id else None
-        self.copy_menu.entryconfigure(0, state="normal" if self._copy_menu_cell else "disabled")
-        try:
-            self.copy_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.copy_menu.grab_release()
-        return "break"
-
-    def _tree_cell_text(self, tree: Any, item_id: str, column_id: str) -> str | None:
-        if not item_id or not tree.exists(item_id):
-            return None
-        try:
-            column_index = int(column_id[1:]) - 1
-        except (ValueError, TypeError):
-            return None
-        values = list(tree.item(item_id, "values"))
-        if not 0 <= column_index < len(values):
-            return None
-        return str(values[column_index])
-
-    def _tree_selection_text(self, tree: Any) -> str:
-        selected = list(tree.selection())
-        if not selected:
-            focus = tree.focus()
-            selected = [focus] if focus else []
-        if not selected:
-            return ""
-        columns = list(tree["columns"])
-        headers = [str(tree.heading(column, "text") or column) for column in columns]
-        lines = ["\t".join(headers)]
-        for item_id in selected:
-            lines.append("\t".join(str(value) for value in tree.item(item_id, "values")))
-        return "\n".join(lines)
-
-
 @dataclass
 class OpenedPdm:
     id: str
@@ -3382,7 +3025,6 @@ class DevToolboxApp(tk.Tk):
             ("cron", "Cron表达式"),
             ("base64", "Base64编解码"),
             ("crypto", "加密哈希"),
-            ("finance", "金融文件阅读器"),
             ("regex", "正则表达式"),
             ("diff", "文档对比"),
             ("pdm", "PDM数据库"),
@@ -3396,7 +3038,7 @@ class DevToolboxApp(tk.Tk):
         self.content.pack(fill="both", expand=True, padx=18, pady=(0, 12))
 
     def _create_pages(self) -> None:
-        page_classes: list[type[ToolPage]] = [JsonPage, CronPage, Base64Page, CryptoPage, FinanceReaderPage, RegexPage, DocumentComparePage, PdmPage]
+        page_classes: list[type[ToolPage]] = [JsonPage, CronPage, Base64Page, CryptoPage, RegexPage, DocumentComparePage, PdmPage]
         for cls in page_classes:
             page = cls(self)
             self.pages[page.key] = page
@@ -3598,12 +3240,6 @@ class DevToolboxApp(tk.Tk):
             line([(6, 8), (6, 6), (7, 4), (9, 3), (11, 4), (12, 6), (12, 8)])
             ellipse((8, 11, 10, 13), outline=False)
             line([(9, 12), (9, 14)])
-        elif key == "finance":
-            rectangle((4, 3, 14, 16))
-            line([(6, 7), (12, 7)])
-            line([(6, 10), (12, 10)])
-            line([(6, 13), (9, 13)])
-            line([(10, 13), (13, 13)])
         elif key == "regex":
             ellipse((3, 8, 5, 10), outline=False)
             line([(11, 4), (11, 14)])
@@ -3656,7 +3292,7 @@ class DevToolboxApp(tk.Tk):
         messagebox.showinfo(
             APP_TITLE,
             f"{APP_TITLE}V{__version__}\n\n"
-            "本地离线开发工具箱：JSON、Cron、Base64、加密哈希、金融文件、正则、文档对比、PDM查看。\n"
+            "本地离线开发工具箱：JSON、Cron、Base64、加密哈希、正则、文档对比、PDM查看。\n"
             "所有数据仅在本机处理，不联网、不上传、不写注册表。\n\n"
             "Author:Valiant",
         )
