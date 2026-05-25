@@ -325,6 +325,9 @@ class ConfigStore:
         self.top = int(data.get("top", 10))
         protocol = data.get("protocol", "Graph")
         self.protocol = "Graph" if protocol in {"Graph优先", "Graph浼樺厛"} else protocol
+        if self.protocol not in {"Graph", "IMAP"}:
+            self.protocol = "Graph"
+        self.protocol = "Graph"
         self.auto_fetch_after_import = bool(data.get("auto_fetch_after_import", True))
         self.concise_mode = bool(data.get("concise_mode", False))
 
@@ -772,6 +775,8 @@ class RoundButton(tk.Canvas):
         self.draw()
 
     def configure(self, cnf=None, **kwargs):
+        if "text" in kwargs:
+            self.text = kwargs.pop("text")
         if "bg" in kwargs:
             self.button_bg = kwargs.pop("bg")
         if "fg" in kwargs:
@@ -957,9 +962,9 @@ class MailFetcherApp(tk.Tk):
 
         row2 = tk.Frame(controls, bg=PANEL)
         row2.pack(fill="x", pady=(12, 0))
-        self.imap_button = make_button(row2, "IMAP", lambda: self.set_protocol("IMAP"), bg="#e7f0ff", fg=BLUE, width=7)
+        self.imap_button = make_button(row2, "IMAP令牌", lambda: self.set_protocol("IMAP"), bg="#e7f0ff", fg=BLUE, width=8)
         self.imap_button.pack(side="left")
-        self.graph_button = make_button(row2, "Graph", lambda: self.set_protocol("Graph"), bg="#e7f0ff", fg=BLUE, width=7)
+        self.graph_button = make_button(row2, "Graph令牌", lambda: self.set_protocol("Graph"), bg="#e7f0ff", fg=BLUE, width=8)
         self.graph_button.pack(side="left", padx=(10, 0))
         RedCheck(row2, self.auto_fetch_var, text="导入后自动取件", command=self.save_config, bg=PANEL, fg=MUTED).pack(side="left", padx=(18, 0))
         RedCheck(row2, self.concise_mode_var, text="简洁模式", command=self.save_config, bg=PANEL, fg=MUTED).pack(side="left", padx=(14, 0))
@@ -1016,7 +1021,12 @@ class MailFetcherApp(tk.Tk):
     def update_protocol_buttons(self) -> None:
         for name, button in (("IMAP", self.imap_button), ("Graph", self.graph_button)):
             active = self.protocol_var.get() == name
-            button.configure(bg="#dbeafe" if active else "#eaf2ff", fg=BLUE)
+            label = f"{name}令牌"
+            button.configure(
+                text=f"✓ {label}" if active else label,
+                bg=BLUE if active else "#eaf2ff",
+                fg="white" if active else BLUE,
+            )
 
     def ensure_graph(self) -> GraphMailClient:
         if self.graph is None:
