@@ -177,6 +177,7 @@ class AccountRecord:
     imported_at: str = ""
     last_fetch_at: str = ""
     last_status: str = "未取件"
+    used: bool = False
 
     @property
     def source(self) -> str:
@@ -222,6 +223,7 @@ class AccountStore:
             "imported_at": item.get("imported_at") or datetime.now(timezone.utc).isoformat(),
             "last_fetch_at": item.get("last_fetch_at", ""),
             "last_status": item.get("last_status", "未取件"),
+            "used": bool(item.get("used", False)),
         }
 
     def save(self) -> None:
@@ -276,6 +278,17 @@ class AccountStore:
             if account and refresh_token and account.refresh_token != refresh_token:
                 account.refresh_token = refresh_token
                 self.save()
+
+    def set_used(self, emails: set[str], used: bool) -> int:
+        with self.lock:
+            changed = 0
+            for account in self.accounts:
+                if account.email in emails and account.used != used:
+                    account.used = used
+                    changed += 1
+            if changed:
+                self.save()
+            return changed
 
     def remove(self, emails: set[str]) -> int:
         with self.lock:
@@ -599,11 +612,11 @@ class RedCheck(tk.Canvas):
 
     def draw(self) -> None:
         self.delete("all")
-        self.create_rectangle(1, 1, 19, 19, fill="white", outline="#9fc2ff", width=2)
+        self.create_rectangle(2, 2, 20, 20, fill="white", outline="#8fb8ff", width=2)
         if self.variable.get():
-            self.create_line(5, 10, 9, 15, 16, 5, fill=RED, width=3, capstyle="round", joinstyle="round")
+            self.create_text(11, 10, text="✓", fill=RED, font=("Segoe UI Symbol", 15, "bold"))
         if self.text:
-            self.create_text(28, 10, text=self.text, anchor="w", fill=self.fg, font=("Microsoft YaHei UI", 9))
+            self.create_text(30, 11, text=self.text, anchor="w", fill=self.fg, font=("Microsoft YaHei UI", 9))
 
 
 class PlaceholderEntry(tk.Entry):
@@ -691,7 +704,7 @@ class ImportDialog(tk.Toplevel):
             messagebox.showwarning("没有账号", "没有识别到有效邮箱。")
             return
         added, updated, skipped = self.master_app.account_store.upsert_records(records)
-        self.master_app.refresh_accounts()
+        self.master_app.set_account_group("unused")
         self.master_app.log(f"导入完成：新增 {added}，更新 {updated}，重复 {skipped}。四段内容已加密保存。")
         if invalid:
             self.master_app.log(f"跳过 {invalid} 行无效邮箱。")
@@ -862,6 +875,7 @@ class MailFetcherApp(tk.Tk):
         self.keyword_var = tk.StringVar()
         self.sender_var = tk.StringVar()
         self.account_search_var = tk.StringVar()
+        self.account_group_var = tk.StringVar(value="unused")
         self.status_var = tk.StringVar(value="就绪")
         self.total_badge_var = tk.StringVar(value="共 0 封")
         self.graph_badge_var = tk.StringVar(value="Graph: 0")
@@ -904,14 +918,26 @@ class MailFetcherApp(tk.Tk):
         account_search = PlaceholderEntry(left, self.account_search_var, "邮箱搜索", relief="flat", bg="white", fg=TEXT, font=("Microsoft YaHei UI", 10))
         account_search.pack(fill="x", ipady=10, pady=(16, 10))
 
+        group_line = tk.Frame(left, bg=PANEL)
+        group_line.pack(fill="x", pady=(0, 10))
+        self.unused_button = make_button(group_line, "未使用", lambda: self.set_account_group("unused"), bg=BLUE, fg="white", width=7)
+        self.unused_button.pack(side="left", fill="x", expand=True)
+        self.used_button = make_button(group_line, "已使用", lambda: self.set_account_group("used"), bg="#eaf2ff", fg=BLUE, width=7)
+        self.used_button.pack(side="left", fill="x", expand=True, padx=(10, 0))
+
         make_button(left, "+  批量导入邮箱", self.open_import_dialog, bg=BLUE, fg="white").pack(fill="x", pady=(4, 10))
         make_button(left, "⇩  导出邮箱", self.export_accounts, bg="#f4faff", fg=TEXT).pack(fill="x")
 
         select_line = tk.Frame(left, bg=PANEL)
-        select_line.pack(fill="x", pady=(22, 12))
+        select_line.pack(fill="x", pady=(18, 8))
         self.select_all_var = tk.BooleanVar(value=True)
         RedCheck(select_line, self.select_all_var, text="全选", command=self.toggle_all_accounts, bg=PANEL, fg=MUTED).pack(side="left")
         make_button(select_line, "删除选中", self.remove_selected, bg="#fff7f7", fg=RED).pack(side="right")
+
+        usage_line = tk.Frame(left, bg=PANEL)
+        usage_line.pack(fill="x", pady=(0, 12))
+        make_button(usage_line, "标记已使用", self.mark_selected_used, bg="#edf7ff", fg=BLUE, width=8).pack(side="left", fill="x", expand=True)
+        make_button(usage_line, "取消标记", self.mark_selected_unused, bg="#f4faff", fg=TEXT, width=8).pack(side="left", fill="x", expand=True, padx=(10, 0))
 
         self.account_scroll = ScrollFrame(left, PANEL)
         self.account_scroll.pack(fill="both", expand=True)
@@ -963,6 +989,7 @@ class MailFetcherApp(tk.Tk):
 
         self.log_box = None
         self.log("已就绪。默认使用 Graph；导入四段内容后会加密保存在本机。")
+        self.update_account_group_buttons()
         self.update_protocol_buttons()
 
     def save_config(self) -> bool:
@@ -999,14 +1026,26 @@ class MailFetcherApp(tk.Tk):
     def open_import_dialog(self) -> None:
         ImportDialog(self)
 
+    def set_account_group(self, group: str) -> None:
+        self.account_group_var.set(group)
+        self.update_account_group_buttons()
+        self.refresh_accounts(reset_scroll=True)
+
+    def update_account_group_buttons(self) -> None:
+        active = self.account_group_var.get()
+        for group, button in (("unused", self.unused_button), ("used", self.used_button)):
+            button.configure(bg=BLUE if active == group else "#eaf2ff", fg="white" if active == group else BLUE)
+
     def filtered_accounts(self) -> list[AccountRecord]:
         needle = self.account_search_var.get().strip().lower()
+        show_used = self.account_group_var.get() == "used"
+        pool = [account for account in self.account_store.accounts if account.used == show_used]
         if not needle:
-            return self.account_store.accounts
-        starts = [account for account in self.account_store.accounts if account.email.lower().startswith(needle)]
+            return pool
+        starts = [account for account in pool if account.email.lower().startswith(needle)]
         contains = [
             account
-            for account in self.account_store.accounts
+            for account in pool
             if needle in account.email.lower() and account not in starts
         ]
         return starts + contains
@@ -1015,7 +1054,7 @@ class MailFetcherApp(tk.Tk):
         for child in self.account_scroll.inner.winfo_children():
             child.destroy()
         accounts = self.filtered_accounts()
-        self.account_count_label.configure(text=str(len(self.account_store.accounts)))
+        self.account_count_label.configure(text=f"{len(accounts)}/{len(self.account_store.accounts)}")
         for account in accounts:
             var = self.account_vars.setdefault(account.email, tk.BooleanVar(value=True))
             row = tk.Frame(self.account_scroll.inner, bg="#e8f2ff", padx=10, pady=10, highlightbackground="#bcd5ff", highlightthickness=1)
@@ -1025,7 +1064,8 @@ class MailFetcherApp(tk.Tk):
             txt = tk.Frame(row, bg="#e8f2ff")
             txt.pack(side="left", fill="x", expand=True)
             tk.Label(txt, text=account.email, bg="#e8f2ff", fg=TEXT, anchor="w", font=("Microsoft YaHei UI", 10)).pack(anchor="w")
-            tk.Label(txt, text=f"{account.source} · {account.last_status}", bg="#e8f2ff", fg=MUTED, anchor="w", font=("Microsoft YaHei UI", 8)).pack(anchor="w")
+            usage_text = "已使用" if account.used else "未使用"
+            tk.Label(txt, text=f"{usage_text} · {account.source} · {account.last_status}", bg="#e8f2ff", fg=MUTED, anchor="w", font=("Microsoft YaHei UI", 8)).pack(anchor="w")
             self.account_scroll.bind_mousewheel_recursive(row)
         if reset_scroll:
             self.account_scroll.canvas.yview_moveto(0)
@@ -1037,13 +1077,19 @@ class MailFetcherApp(tk.Tk):
         self.status_var.set("已复制")
         self.log(f"已复制邮箱：{email_address}")
 
+    def visible_account_emails(self) -> set[str]:
+        return {account.email for account in self.filtered_accounts()}
+
     def selected_emails(self) -> list[str]:
-        return [email for email, var in self.account_vars.items() if var.get() and self.account_store.get(email)]
+        visible = self.visible_account_emails()
+        return [email for email, var in self.account_vars.items() if email in visible and var.get() and self.account_store.get(email)]
 
     def toggle_all_accounts(self) -> None:
         state = self.select_all_var.get()
-        for var in self.account_vars.values():
-            var.set(state)
+        visible = self.visible_account_emails()
+        for email, var in self.account_vars.items():
+            if email in visible:
+                var.set(state)
 
     def remove_selected(self) -> None:
         selected = set(self.selected_emails())
@@ -1056,6 +1102,25 @@ class MailFetcherApp(tk.Tk):
             self.account_vars.pop(email_address, None)
         self.refresh_accounts()
         self.log(f"已删除 {removed} 个邮箱。")
+
+    def mark_selected_used(self) -> None:
+        self.set_selected_usage(True)
+
+    def mark_selected_unused(self) -> None:
+        self.set_selected_usage(False)
+
+    def set_selected_usage(self, used: bool) -> None:
+        selected = set(self.selected_emails())
+        if not selected:
+            return
+        changed = self.account_store.set_used(selected, used)
+        target = "已使用" if used else "未使用"
+        for email_address in selected:
+            var = self.account_vars.get(email_address)
+            if var:
+                var.set(False)
+        self.refresh_accounts(reset_scroll=True)
+        self.log(f"已将 {changed} 个邮箱移动到{target}。")
 
     def clear_accounts(self) -> None:
         if not self.account_store.accounts:
