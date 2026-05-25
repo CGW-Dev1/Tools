@@ -678,7 +678,8 @@ class ImportDialog(tk.Toplevel):
         super().__init__(master)
         self.master_app = master
         self.title("批量导入邮箱")
-        self.geometry("760x500")
+        self.geometry("820x620")
+        self.minsize(760, 560)
         self.configure(bg=BG)
         self.grab_set()
 
@@ -691,14 +692,19 @@ class ImportDialog(tk.Toplevel):
             bg=PANEL,
             fg=MUTED,
             font=("Microsoft YaHei UI", 10),
-        ).pack(anchor="w", pady=(4, 10))
-        self.text = ScrolledText(box, height=18, wrap="none", font=("Consolas", 10))
-        self.text.pack(fill="both", expand=True)
+            anchor="w",
+            justify="left",
+            wraplength=740,
+        ).pack(fill="x", anchor="w", pady=(4, 10))
         bar = tk.Frame(box, bg=PANEL)
-        bar.pack(fill="x", pady=(12, 0))
+        bar.pack(side="bottom", fill="x", pady=(12, 0))
         make_button(bar, "从文件载入", self.load_file, bg="#eef6ff", fg=TEXT).pack(side="left")
         make_button(bar, "取消", self.destroy, bg="#eef6ff", fg=TEXT).pack(side="right")
         make_button(bar, "导入并取件", self.import_now, bg=BLUE, fg="white").pack(side="right", padx=(0, 8))
+        text_box = tk.Frame(box, bg="white", highlightbackground="#9fc2ff", highlightthickness=1)
+        text_box.pack(fill="both", expand=True)
+        self.text = ScrolledText(text_box, height=14, wrap="none", relief="flat", bd=0, font=("Consolas", 10))
+        self.text.pack(fill="both", expand=True, padx=1, pady=1)
 
     def load_file(self) -> None:
         path = filedialog.askopenfilename(title="选择账号文本", filetypes=[("Text files", "*.txt *.csv"), ("All files", "*.*")])
