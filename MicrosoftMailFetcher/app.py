@@ -20,6 +20,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from tkinter.scrolledtext import ScrolledText
 import tkinter as tk
+import tkinter.font as tkfont
 from urllib.parse import urlencode
 
 import msal
@@ -53,12 +54,48 @@ PANEL = "#f6fbff"
 CARD = "#f8fbff"
 BORDER = "#d9e8fb"
 TEXT = "#223047"
-MUTED = "#8aa0bb"
+MUTED = "#60758f"
 BLUE = "#2f6fed"
 BLUE_DARK = "#0b9bd8"
 GREEN = "#12b981"
 GREEN_BG = "#dcf8f0"
 RED = "#ef4444"
+
+
+def enable_dpi_awareness() -> None:
+    if not hasattr(ctypes, "windll"):
+        return
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+def configure_default_fonts() -> None:
+    for name, size in (
+        ("TkDefaultFont", 10),
+        ("TkTextFont", 10),
+        ("TkMenuFont", 10),
+        ("TkHeadingFont", 10),
+        ("TkTooltipFont", 9),
+        ("TkCaptionFont", 10),
+        ("TkSmallCaptionFont", 9),
+        ("TkIconFont", 10),
+    ):
+        try:
+            tkfont.nametofont(name).configure(family="Microsoft YaHei UI", size=size)
+        except tk.TclError:
+            continue
 
 
 def app_data_dir() -> Path:
@@ -731,6 +768,7 @@ def make_button(master, text: str, command, bg: str = BLUE, fg: str = "white", w
 class MailFetcherApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
+        configure_default_fonts()
         self.title(f"{DISPLAY_NAME} | IMAP + Graph API")
         self.geometry("1480x860")
         self.minsize(1180, 720)
@@ -924,6 +962,7 @@ class MailFetcherApp(tk.Tk):
             row = tk.Frame(self.account_scroll.inner, bg="#e8f2ff", padx=10, pady=10, highlightbackground="#bcd5ff", highlightthickness=1)
             row.pack(fill="x", pady=(0, 10))
             RedCheck(row, var, bg="#e8f2ff").pack(side="left")
+            make_button(row, "复制", lambda email_address=account.email: self.copy_email(email_address), bg="#ffffff", fg=BLUE, width=3).pack(side="right", padx=(8, 0))
             txt = tk.Frame(row, bg="#e8f2ff")
             txt.pack(side="left", fill="x", expand=True)
             tk.Label(txt, text=account.email, bg="#e8f2ff", fg=TEXT, anchor="w", font=("Microsoft YaHei UI", 10)).pack(anchor="w")
@@ -931,6 +970,13 @@ class MailFetcherApp(tk.Tk):
             self.account_scroll.bind_mousewheel_recursive(row)
         if reset_scroll:
             self.account_scroll.canvas.yview_moveto(0)
+
+    def copy_email(self, email_address: str) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(email_address)
+        self.update()
+        self.status_var.set("已复制")
+        self.log(f"已复制邮箱：{email_address}")
 
     def selected_emails(self) -> list[str]:
         return [email for email, var in self.account_vars.items() if var.get() and self.account_store.get(email)]
@@ -1262,4 +1308,5 @@ def extract_verification_code(*parts: str) -> str:
 
 
 if __name__ == "__main__":
+    enable_dpi_awareness()
     MailFetcherApp().mainloop()
